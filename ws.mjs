@@ -1,23 +1,22 @@
 import 'dotenv/config'
 import { AccelByte } from '@accelbyte/sdk'
-import { IamUserAuthorizationClient, UsersAdminApi, UsersV4AdminApi, OAuth20V4Api } from '@accelbyte/sdk-iam'
+import { IamUserAuthorizationClient, UsersAdminApi, UsersV4AdminApi, OAuth20V4Api, UsersApi } from '@accelbyte/sdk-iam'
 // import { UserProfileApi } from '@accelbyte/sdk-basic';
 import { Lobby } from '@accelbyte/sdk-lobby'
-import { MatchTicketsApi } from '@accelbyte/sdk-matchmaking'
+import { MatchTicketsApi, BackfillApi } from '@accelbyte/sdk-matchmaking'
 import { PartyApi, GameSessionApi} from '@accelbyte/sdk-session'
 
 import { parseArgs } from 'util'
 
 import readline from 'readline';
-import { create } from 'domain'
-import { join } from 'path'
 
 const sdk = AccelByte.SDK({
   coreConfig: {
     baseURL: process.env.AB_BASE_URL || '',
     clientId: process.env.AB_CLIENT_ID || '',
     redirectURI: process.env.AB_REDIRECT_URI || '',
-    namespace: process.env.AB_NAMESPACE || ''
+    namespace: process.env.AB_NAMESPACE || '',
+    useSchemaValidation: false
   }
 })
 
@@ -52,38 +51,60 @@ function subtract(a, b) {
 
 const commands = {
   greet: greet,
+  g: greet,  // shortcut for greet
   add: add,
-  subtract: subtract,
+  a: add,    // shortcut for add
+  subtract: subtract, 
+  s: subtract, // shortcut for subtract
   me: me,
+  m: me,     // shortcut for me
   patch_me: patchMe,
+  pm: patchMe, // shortcut for patch_me
   create_match_ticket: createMatchTicket,
+  cmt: createMatchTicket, // shortcut for create_match_ticket
   create_party: createParty,
+  cp: createParty, // shortcut for create_party
   join_party: joinParty,
+  jp: joinParty, // shortcut for join_party
   create_gamesession: createGameSession,
-  browse_gamesessions: browseGameSessions,
+  cgs: createGameSession, // shortcut for create_gamesession
   join_gamesession: joinGameSession,
+  jgs: joinGameSession, // shortcut for join_gamesession
   join_gamesession_by_code: joinGameSessionByCode,
+  jgc: joinGameSessionByCode, // shortcut for join_gamesession_by_code
   update_gamesession: updateGameSession,
+  ugs: updateGameSession, // shortcut for update_gamesession
+  browse_gamesessions: browseGameSessions,
+  bgs: browseGameSessions, // shortcut for browse_gamesessions
   get_users_me_gamesessions: getUsersMeGamesessions,
+  gms: getUsersMeGamesessions, // shortcut for get_users_me_gamesessions
+  create_user_bulk: createUserBulk,
+  cub: createUserBulk, // shortcut for create_user_bulk
+  remove_backfill: deleteBackfill,
+  rb: deleteBackfill, // shortcut for remove_backfill
   help: showHelp,
   h: showHelp
 };
 
 function showHelp() {
-  console.log('Available commands:');
-  console.log('greet <name> - Greet the user');
-  console.log('add <a> <b> - Add two numbers');
-  console.log('subtract <a> <b> - Subtract two numbers');
-  console.log('me - Get user information');
-  console.log('patch_me <displayName> <uniqueDisplayName> - Update user information');
-  console.log('create_match_ticket <matchPool> - Create a match ticket');
-  console.log('create_party <minPlayers> <maxPlayers> - Create a party');
-  console.log('join_party <code> - Join a party by code');
-  console.log('create_gamesession <session_name> - Create a game session');
-  console.log('join_gamesession <sessionID> - Join a game session');
-  console.log('join_gamesession_by_code <code> - Join a game session by code');
-  console.log('update_gamesession <sessionID> <joinability> - Update a game session, joinability: "OPEN" or "CLOSED"');
-  console.log('help or h - Show this help message');
+  console.log('Available commands (with shortcuts):');
+  console.log('greet, g <name> - Greet the user');
+  console.log('add, a <a> <b> - Add two numbers');
+  console.log('subtract, s <a> <b> - Subtract two numbers');
+  console.log('me, m - Get user information');
+  console.log('patch_me, pm <displayName> <uniqueDisplayName> - Update user information');
+  console.log('create_match_ticket, cmt <matchPool> - Create a match ticket');
+  console.log('create_party, cp <minPlayers> <maxPlayers> - Create a party');
+  console.log('join_party, jp <code> - Join a party by code');
+  console.log('create_gamesession, cgs <session_name> - Create a game session');
+  console.log('join_gamesession, jgs <sessionID> - Join a game session');
+  console.log('join_gamesession_by_code, jgc <code> - Join a game session by code');
+  console.log('update_gamesession, ugs <sessionID> <joinability> - Update a game session');
+  console.log('browse_gamesessions, bgs - Browse game sessions');
+  console.log('get_users_me_gamesessions, gms - Get user\'s game sessions');
+  console.log('create_user_bulk, cub <userIdsJson> - Create users in bulk');
+  console.log('remove_backfill, rb <backfillTicketID> - Remove a backfill ticket');
+  console.log('help, h - Show this help message');
 }
 
 //getUsersMeGamesessions
@@ -116,7 +137,7 @@ function createMatchTicket(matchPool) {
       // attributes: {'new_session_only': true}
     })
     .then(response => {
-      console.info('createMatchTicket response.data', response.data)
+      console.info(response.data)
     })
     .catch(err => {
       console.error(err)
@@ -153,31 +174,170 @@ function createGameSession(session_name) {
   GameSessionApi(sdk).createGamesession({
     configurationName: session_name,
   }).then(response => {
-    console.info('createGameSession response.data', response.data)
+    handleSessionResponse(response);
   }).catch(err => {
-    console.error(err)
+    handleSessionError(err);
   })
 }
 
-//browse_gamesessions
 function browseGameSessions() {
-  //createGamesession_ByNS
-  GameSessionApi(sdk).createGamesession_ByNS({
-    namespace: 'default',
-    limit: 10,
-    offset: 0,
-    sortBy: 'createdAt',
-    sort: 'desc',
-  }).then(response => {
-    console.info('createGamesession_ByNS response.data', response.data)
+  GameSessionApi(sdk).createGamesession_ByNS().then(response => {
+    if (Array.isArray(response.data.data)) {
+      if (response.data.data.length === 0) {
+        console.log('No game sessions found');
+        return;
+      }
+      response.data.data.forEach((session, index) => {
+        console.log(formatSessionDetails(session));
+      });
+    } else {
+      console.error('Expected an array but got:', typeof response.data);
+    }
   }).catch(err => {
     console.error(err)
   })
 }
 
-//join_gamesession_by_code
+// Common formatting constants
+const SEPARATOR = '-'.repeat(20);
+const INDENT_CHAR = '  ';
+const LIST_MARKER = '•';
+const TEAM_MARKER = '►';
+const TREE_BRANCH = '├─';
+const TREE_END = '└─';
+
+/**
+ * Shared team formatting function
+ */
+function formatTeam(team, teamIndex) {
+  const usersList = team.userIDs
+    .map(id => `${INDENT_CHAR}│${INDENT_CHAR}${LIST_MARKER} ${id}`)
+    .join('\n');
+    
+  const partiesList = team.parties.map((party, partyIndex, parties) => {
+    const isLastParty = partyIndex === parties.length - 1;
+    const branchChar = isLastParty ? TREE_END : TREE_BRANCH;
+    const contentPrefix = isLastParty ? INDENT_CHAR : '│';
+    
+    const partyUsers = party.userIDs
+      .map(id => `${INDENT_CHAR}${INDENT_CHAR}${contentPrefix}${INDENT_CHAR}${INDENT_CHAR}${LIST_MARKER} ${id}`)
+      .join('\n');
+      
+    return `
+${INDENT_CHAR}${INDENT_CHAR}${branchChar} Party ${partyIndex + 1}:
+${INDENT_CHAR}${INDENT_CHAR}${contentPrefix}${INDENT_CHAR} ID: ${party.partyID || 'N/A'}
+${partyUsers}`;
+  }).join('');
+
+  return `
+${TEAM_MARKER} Team ${teamIndex + 1}:
+${INDENT_CHAR}${TREE_BRANCH} Users:
+${usersList}
+${INDENT_CHAR}${TREE_END} Parties:${partiesList}`;
+}
+
+/**
+ * Formats session details into a readable string representation
+ * @param {Object} data - Session data object
+ * @returns {string} Formatted session details
+ */
+function formatSessionDetails(data) {
+  function formatBasicInfo() {
+    return `
+Session Details:
+${SEPARATOR}
+ID: ${data.id}
+Code: ${data.code}
+Leader ID: ${data.leaderID}
+Created At: ${data.createdAt}`;
+  }
+
+  function formatMembers() {
+    if (!data.members?.length) return '';
+    
+    const membersList = data.members
+      .map(member => `- ${member.id}`)
+      .join('\n');
+      
+    return `
+Members:
+${membersList}`;
+  }
+
+  function formatTeams() {
+    if (!data.teams?.length) return '';
+    
+    return `
+Teams:
+${SEPARATOR}${data.teams.map((team, idx) => formatTeam(team, idx)).join('\n')}
+${SEPARATOR}`;
+  }
+
+  return `${formatBasicInfo()}${formatMembers()}${formatTeams()}`;
+}
+
+function displayMemberChanges(decodedPayload) {
+  console.log(`Members changed in session ${decodedPayload.SessionID}
+  Joiner: ${decodedPayload.JoinerID}
+  Leader: ${decodedPayload.LeaderID}`);
+
+  if (!decodedPayload.Teams) return;
+
+  console.log(`
+  Teams Update:
+  ${SEPARATOR}${decodedPayload.Teams.map((team, idx) => formatTeam(team, idx)).join('\n')}
+  ${SEPARATOR}`);
+}
+
+function handleSessionResponse(response) {
+  const { status, data, config } = response;
+
+  console.log('\n=== Session Response ===');
+  console.log('Status:', status);
+  console.log('Endpoint:', `${config.method.toUpperCase()} ${config.url}`);
+
+  if (status === 200 || status === 201) {
+    console.log(formatSessionDetails(data));
+    return {
+      status,
+      sessionId: data.id,
+      code: data.code
+    };
+  } else {
+    console.log('\nError Details:');
+    console.log('-'.repeat(20));
+    console.log('Code:', data.errorCode);
+    console.log('Name:', data.name);
+    console.log('Message:', data.errorMessage);
+
+    return {
+      status,
+      error: {
+        code: data.errorCode,
+        name: data.name,
+        message: data.errorMessage
+      }
+    };
+  }
+}
+
+function handleSessionError(error) {
+  const {status, data, config} = error.response || {};
+  
+  console.log('\n=== Join Session Error ===');
+  console.log('Status:', status);
+  console.log('Endpoint:', `${config?.method?.toUpperCase()} ${config?.url}`);
+  
+  if (data) {
+    console.log('\nError Details:');
+    console.log('-'.repeat(20));
+    console.log('Code:', data.errorCode);
+    console.log('Name:', data.name); 
+    console.log('Message:', data.errorMessage);
+  }
+}
+
 function joinGameSessionByCode(code) {
-  //if code is not provided, return
   if (!code) {
     console.error('Please provide a code to join the game session')
     return
@@ -185,9 +345,9 @@ function joinGameSessionByCode(code) {
   GameSessionApi(sdk).createGamesessionJoinCode({
     code: code,
   }).then(response => {
-    console.info('joinGameSession response.data', response.data)
+    handleSessionResponse(response);
   }).catch(err => {
-    console.error(err)
+    handleSessionError(err);
   })
 }
 
@@ -199,9 +359,9 @@ function joinGameSession(sessionID) {
     return
   }
   GameSessionApi(sdk).createJoin_BySessionId(sessionID).then(response => {
-    console.info('createJoin_BySessionId response.data', response.data)
+    handleSessionResponse(response);
   }).catch(err => {
-    console.error(err)
+    handleSessionError(err);
   })
 }
 
@@ -226,10 +386,30 @@ function updateGameSession(sessionID, joinability, version) {
   })
 }
 
-//get_users_me_gamesessions
 async function getUsersMeGamesessions() {
   let response = await GameSessionApi(sdk).getUsersMeGamesessions()
+  if (response?.data) {
+    console.log(response.data.paging)
+    response.data.data.forEach(session => {
+      console.log(formatSessionDetails(session));
+    });
+  }
+}
+
+async function createUserBulk(userIds) {
+  let response = await UsersApi(sdk).createUserBulkBasic_v3({
+    userIds: userIds
+  })
   console.log(response.data)
+}
+
+async function deleteBackfill(backfillTicketID) {
+  BackfillApi(sdk).deleteBackfill_ByBackfillId(backfillTicketID).then(response => {
+    console.log(response.status)
+  }
+  ).catch(err => {
+    console.error(err)
+  })
 }
 
 function ask() {
@@ -263,6 +443,121 @@ async function loginWithDevice(deviceId) {
   return response.data
 }
 
+function decodeBase64Payload(payload) {
+  try {
+    const decoded = atob(payload);
+    return JSON.parse(decoded);
+  } catch (error) {
+    console.error('Failed to decode payload:', error);
+    return null;
+  }
+}
+
+function handleSessionNotification(topic, payload) {
+  const decodedPayload = decodeBase64Payload(payload);
+  if (!decodedPayload) return;
+
+  console.log(`\n=== ${topic} ===`);
+  
+  switch (topic) {
+    case 'OnSessionInvited':
+      console.log(`Session Invite: ${decodedPayload.SessionID}`);
+      console.log(`From: ${decodedPayload.SenderID}`);
+      console.log(`Expires: ${decodedPayload.ExpiredAt}`);
+      break;
+
+    case 'OnSessionRejected':
+      console.log(`Session ${decodedPayload.SessionID} rejected by ${decodedPayload.RejectedID}`);
+      console.log('Current members status:');
+      decodedPayload.Members.forEach(member => {
+        console.log(`- ${member.ID}: ${member.StatusV2}`);
+      });
+      break;
+
+    case 'OnSessionKicked':
+      console.log(`Kicked from session ${decodedPayload.SessionID}`);
+      break;
+
+    case 'OnSessionJoined':
+      console.log(`ID: ${decodedPayload.SessionID}`);
+      console.log('Members:');
+      decodedPayload.Members.forEach(member => {
+        console.log(`- ${member.ID}: ${member.StatusV2}`);
+      });
+      break;
+
+    case 'OnGameSessionInviteTimeout':
+    case 'OnGameSessionInviteCancelled':
+      console.log(`Session ${decodedPayload.SessionID} invitation ${topic.replace('OnGameSession', '').toLowerCase()}`);
+      break;
+
+    case 'OnSessionStorageChanged':
+      console.log(`Storage changed in session ${decodedPayload.SessionID}`);
+      console.log('Changes:', JSON.stringify(decodedPayload.StorageChanges, null, 2));
+      console.log(`Changed by: ${decodedPayload.ActorUserID}`);
+      break;
+
+    case 'OnSessionNativePlatformSynced':
+      console.log(`Session ${decodedPayload.SessionID} synced with ${decodedPayload.PlatformName}`);
+      console.log(`Platform session ID: ${decodedPayload.PlatformSessionID}`);
+      break;
+
+    case 'OnSessionJoinedSecret':
+      console.log(`Received session secret: ${decodedPayload.secret}`);
+      break;
+
+      case 'OnSessionMembersChanged':
+        displayMemberChanges(decodedPayload);
+        break;
+  
+      case 'OnGameSessionUpdated':
+        console.log(`Session ${decodedPayload.ID} updated`);
+        console.log('Configuration:', decodedPayload.Configuration);
+        console.log('Version:', decodedPayload.Version);
+        console.log('Leader ID:', decodedPayload.LeaderID);
+        break;
+  
+      case 'OnDSStatusChanged':
+        console.log(`DS Status changed for session ${decodedPayload.SessionID}`);
+        if (decodedPayload.GameServer) {
+          console.log('Server Status:', decodedPayload.GameServer.status);
+          console.log('IP:', decodedPayload.GameServer.ip);
+          console.log('Port:', decodedPayload.GameServer.port);
+          console.log('Protocol:', decodedPayload.GameServer.protocol);
+        }
+        break;
+  
+      default:
+        console.log('Unhandled topic:', topic);
+        console.log('Payload:', decodedPayload);
+  }
+}
+
+function handleWebSocketClose(err) {
+  const closeInfo = {
+    code: err?.[Symbol.for('kCode')] || 0,
+    reason: err?.[Symbol.for('kReason')] || 'Unknown',
+    wasClean: err?.[Symbol.for('kWasClean')] || false
+  };
+
+  console.log('\n=== WebSocket Connection Closed ===');
+  console.log('Code:', closeInfo.code);
+  console.log('Reason:', closeInfo.reason);
+  console.log('Clean Disconnect:', closeInfo.wasClean);
+
+  // Handle specific close codes
+  switch (closeInfo.code) {
+    case 4020:
+      console.log('Session expired or token revoked. Please re-authenticate.');
+      break;
+    case 1000:
+      console.log('Normal closure');
+      break;
+    default:
+      console.log('Unexpected disconnection');
+  }
+}
+
 const main = async () => {
   try {
     const parsedArgs = parseArgs({
@@ -270,13 +565,7 @@ const main = async () => {
         username: { type: 'string' },
         password: { type: 'string' },
         deviceId: { type: 'string' },
-        loginType: { type: 'string' },
-        createMatchTicket: { type: 'boolean' },
-        sessionID: { type: 'string' },
-        createParty: { type: 'boolean' },
-        joinParty: { type: 'string' },
-        createSession: { type: 'boolean' },
-        joinSession : { type: 'string' }
+        loginType: { type: 'string' }
       },
       args: process.argv.slice(2)
     })
@@ -304,73 +593,18 @@ const main = async () => {
       console.log('websocket connected')
     })
 
-    lobbyWs.onClose(err => console.log('closed', err))
+    lobbyWs.onClose(err => handleWebSocketClose(err));
     lobbyWs.onMessage(message => {
       switch (message?.type) {
         case 'connectNotif': {
-          console.log('>>connectNotif')
           break
         }
         case 'messageNotif': {
-          console.log('>>messageNotif')
-          try {
-            if (!message?.payload) {
-              console.log('No message or payload found');
-              return;
-            }
-          
-            const data = JSON.parse(atob(message.payload));
-            console.log('data:', data);
-
-            if (data?.Teams?.[0]?.UserIDs) {
-              console.log('UserIDs:', data.Teams[0].UserIDs);
-              return;
-            }
-          } catch (error) {
-            console.error('Error processing payload:', error.message);
-          }
           break
         }
 
         case 'messageSessionNotif': {
-          console.log('>>messageSessionNotif')
-          if (message?.payload) {
-            const payload = JSON.parse(atob(message.payload));
-            if ('SessionID' in payload && 'SenderID' in payload && 'ExpiredAt' in payload) {
-              console.log('Received invitation:');
-              console.log('SessionID:', payload.sessionID);
-              console.log('SenderID:', payload.SenderID);
-              console.log('ExpiredAt:', payload.ExpiredAt);
-            } else {
-              console.log('Payload:', payload);
-            }
-          }
-
-          try {
-            const data = JSON.parse(atob(message.payload));
-          
-            if (data?.Teams) {
-              data.Teams.forEach(team => {
-                console.log('UserIDs:', team.userIDs || 'No UserIDs found');
-                console.log('Parties:', team.parties || 'No Parties found');
-              });
-            }
-
-            //Members: [ [Object] ], 印出來
-            if (data?.Members) {
-              data.Members.forEach(member => {
-                console.log('Members:', member || 'No Members found');
-              });
-            }
-          } catch (error) {
-            console.error('Error processing payload:', error.message);
-            //
-          }
-          break
-        }
-
-        default: {
-          console.info(message)
+          handleSessionNotification(message.topic, message.payload);
           break
         }
       }

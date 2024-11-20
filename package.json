@@ -6,12 +6,14 @@
   "type": "module",
   "scripts": {
     "start": "node public.mjs --username leelai.tw@gmail.com --password 8ik,mnhy",
+    "start:test": "node ws.mjs --username leelai.tw@gmail.com --password 8ik,mnhy",
     "start:main": "node ws.mjs --deviceId luka --loginType device",
     "start:main1": "node ws.mjs --deviceId luka_1 --loginType device",
     "start:main2": "node ws.mjs --deviceId luka_2 --loginType device",
     "start:main3": "node ws.mjs --deviceId luka_3 --loginType device",
     "start:main4": "node ws.mjs --deviceId luka_4 --loginType device",
     "start:main5": "node ws.mjs --deviceId luka_5 --loginType device",
+    "start:main6": "node ws.mjs --deviceId luka_6 --loginType device",
     "start:admin": "node admin.mjs",
     "start:legal": "node legal.mjs"
   },
