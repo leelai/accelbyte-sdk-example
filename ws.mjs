@@ -1,14 +1,17 @@
 import 'dotenv/config'
-import { AccelByte } from '@accelbyte/sdk'
+import { AccelByte, createAuthInterceptor } from '@accelbyte/sdk'
 import { IamUserAuthorizationClient, UsersAdminApi, UsersV4AdminApi, OAuth20V4Api, UsersApi } from '@accelbyte/sdk-iam'
 // import { UserProfileApi } from '@accelbyte/sdk-basic';
 import { Lobby } from '@accelbyte/sdk-lobby'
 import { MatchTicketsApi, BackfillApi } from '@accelbyte/sdk-matchmaking'
 import { PartyApi, GameSessionApi} from '@accelbyte/sdk-session'
+import { NamespaceAdminApi } from '@accelbyte/sdk-basic'
 
 import { parseArgs } from 'util'
 
 import readline from 'readline';
+
+let currentSessionMembers = new Map(); // Store member info by session ID
 
 const sdk = AccelByte.SDK({
   coreConfig: {
@@ -17,12 +20,20 @@ const sdk = AccelByte.SDK({
     redirectURI: process.env.AB_REDIRECT_URI || '',
     namespace: process.env.AB_NAMESPACE || '',
     useSchemaValidation: false
+  },
+  axiosConfig: {
+    interceptors: [
+      createAuthInterceptor({
+        clientId: process.env.AB_CLIENT_ID
+      })
+    ]
   }
 })
 
 async function loginWithCredentials(username, password) {
-  const tokenResponse = await new IamUserAuthorizationClient(sdk)
-    .loginWithPasswordAuthorization({ username, password })
+  console.log('Logging in with credentials...')
+  const tokenResponse = await new IamUserAuthorizationClient(sdk).loginWithPasswordAuthorization({ username, password })
+  console.log('tokenResponse', tokenResponse)
   
   if (!tokenResponse.response?.data.access_token) {
     throw new Error('Credential login failed')
@@ -68,6 +79,8 @@ const commands = {
   jp: joinParty, // shortcut for join_party
   create_gamesession: createGameSession,
   cgs: createGameSession, // shortcut for create_gamesession
+  delete_gamesession: deleteGameSession,
+  dgs: deleteGameSession, // shortcut for delete_gamesession
   join_gamesession: joinGameSession,
   jgs: joinGameSession, // shortcut for join_gamesession
   join_gamesession_by_code: joinGameSessionByCode,
@@ -83,7 +96,14 @@ const commands = {
   remove_backfill: deleteBackfill,
   rb: deleteBackfill, // shortcut for remove_backfill
   help: showHelp,
-  h: showHelp
+  h: showHelp,
+  list_members: listSessionMembers,
+  lm: listSessionMembers, // shortcut
+  list_sessions: listAllSessions,
+  ls: listAllSessions, // shortcut
+  get_token: getToken,
+  gt: getToken, // shortcut for get_token
+  cn: createNamespace,
 };
 
 function showHelp() {
@@ -104,10 +124,72 @@ function showHelp() {
   console.log('get_users_me_gamesessions, gms - Get user\'s game sessions');
   console.log('create_user_bulk, cub <userIdsJson> - Create users in bulk');
   console.log('remove_backfill, rb <backfillTicketID> - Remove a backfill ticket');
+  console.log('list_members, lm [sessionId] - List members in all sessions or specific session');
+  console.log('list_sessions, ls - List all active sessions');
+  console.log('get_token, gt - Get current access token');
   console.log('help, h - Show this help message');
 }
 
-//getUsersMeGamesessions
+function createNamespace(displayName, namespace) {
+  NamespaceAdminApi(sdk).createNamespace({
+    displayName: displayName,
+    namespace: namespace,
+  }).then(response => { 
+    console.log(response.data)
+  }
+  ).catch(err => {
+    console.log(err.response.data)
+  })
+}
+
+// Add new function after listSessionMembers
+function listAllSessions() {
+  if (currentSessionMembers.size === 0) {
+    console.log('No active sessions');
+    return;
+  }
+  console.log('\nActive Sessions:');
+  for (const [sessionId, members] of currentSessionMembers) {
+    console.log(`\nSession ID: ${sessionId}`);
+    console.log(`Total Members: ${members.length}`);
+  }
+}
+
+// Add new command function
+function listSessionMembers(sessionId, statusFilter) {
+  if (!sessionId) {
+    // List all sessions and their members
+    if (currentSessionMembers.size === 0) {
+      console.log('No active sessions');
+      return;
+    }
+    console.log('\nCurrent Session Members:');
+    for (const [sid, members] of currentSessionMembers) {
+      console.log(`\nSession ${sid}:`);
+      const filteredMembers = statusFilter ? 
+        members.filter(m => m.status === statusFilter) :
+        members;
+      filteredMembers.forEach(m => console.log(`- ${m.id} (${m.status})`));
+    }
+  } else {
+    // List specific session
+    const members = currentSessionMembers.get(sessionId);
+    if (!members) {
+      console.log(`No members found for session ${sessionId}`);
+      return;
+    }
+    console.log(`\nMembers in session ${sessionId}:`);
+    const filteredMembers = statusFilter ? 
+      members.filter(m => m.status === statusFilter) :
+      members;
+    filteredMembers.forEach(m => console.log(`- ${m.id} (${m.status})`));
+  }
+}
+
+function getToken() {
+  const token = sdk.getToken();
+  console.log(token);
+}
 
 async function me() {
   let response = await UsersAdminApi(sdk).getUsersMe_v3()
@@ -137,14 +219,14 @@ function createMatchTicket(matchPool) {
       // attributes: {'new_session_only': true}
     })
     .then(response => {
-      console.info(response.data)
+      handleMatchTicketResponse(response);
     })
     .catch(err => {
       console.error(err)
     })
 }
 
-function createParty(minPlayers, maxPlayers) {
+function createParty(minPlayers = 2, maxPlayers = 10) {
   //convert string to number
   minPlayers = parseInt(minPlayers)
   maxPlayers = parseInt(maxPlayers)
@@ -152,7 +234,8 @@ function createParty(minPlayers, maxPlayers) {
     minPlayers: minPlayers,
     maxPlayers: maxPlayers,
   }).then(response => {
-    console.info('createParty response.data', response.data)
+    // console.info('createParty response.data', response.data)
+    handleSessionResponse(response);
   }).catch(err => {
     console.error(err)
   })
@@ -177,6 +260,15 @@ function createGameSession(session_name) {
     handleSessionResponse(response);
   }).catch(err => {
     handleSessionError(err);
+  })
+}
+
+function deleteGameSession(sessionID) {
+  //deleteGamesession_BySessionId
+  GameSessionApi(sdk).deleteGamesession_BySessionId(sessionID).then(response => {
+    console.log(response.status)
+  }).catch(err => {
+    console.error(err)
   })
 }
 
@@ -289,6 +381,66 @@ function displayMemberChanges(decodedPayload) {
   ${SEPARATOR}`);
 }
 
+function formatPartyMemberChanges(data) {
+  const basicInfo = `
+Party Details:
+${SEPARATOR}
+Party ID: ${data.PartyID}
+Leader ID: ${data.LeaderID}
+Text Chat: ${data.TextChat}
+`;
+
+  const membersInfo = data.Members.map(member => `
+Member: ${member.ID}
+Status: ${member.Status}
+Status V2: ${member.StatusV2}
+Updated At: ${member.UpdatedAt}`).join('\n');
+
+  const sessionInfo = data.Session ? `
+Session Info:
+${SEPARATOR}
+ID: ${data.Session.ID}
+Code: ${data.Session.Code}
+Configuration: ${data.Session.ConfigurationName}
+Min Players: ${data.Session.Configuration.MinPlayers}
+Max Players: ${data.Session.Configuration.MaxPlayers}
+Joinability: ${data.Session.Configuration.Joinability}
+Is Full: ${data.Session.IsFull}` : '';
+
+  return `${basicInfo}${membersInfo}${sessionInfo}
+${SEPARATOR}`;
+}
+
+function formatPartyCreation(data) {
+  return `
+Party Created:
+${SEPARATOR}
+Party ID: ${data.PartyID}
+Created By: ${data.CreatedBy}
+Join Code: ${data.Code}
+Text Chat: ${data.TextChat}
+Inactive Timeout: ${data.inactiveTimeout}s
+${SEPARATOR}`;
+}
+
+function formatPartyJoined(data) {
+  const membersInfo = data.Members.map(member => `
+Member: ${member.ID}
+Status: ${member.Status}
+Status V2: ${member.StatusV2}
+Updated At: ${member.UpdatedAt}`).join('\n');
+
+  return `
+Party Joined:
+${SEPARATOR}
+Party ID: ${data.PartyID}
+Join Code: ${data.Code}
+Text Chat: ${data.TextChat}
+${SEPARATOR}
+Members:${membersInfo}
+${SEPARATOR}`;
+}
+
 function handleSessionResponse(response) {
   const { status, data, config } = response;
 
@@ -334,6 +486,40 @@ function handleSessionError(error) {
     console.log('Code:', data.errorCode);
     console.log('Name:', data.name); 
     console.log('Message:', data.errorMessage);
+  }
+}
+
+function handleMatchTicketResponse(response) {
+  const { status, data, config } = response;
+
+  console.log('\n=== Match Ticket Response ===');
+  console.log('Status:', status);
+  console.log('Endpoint:', `${config.method.toUpperCase()} ${config.url}`);
+
+  if (status === 200 || status === 201) {
+    console.log(`\nMatch Ticket Details:`);
+    console.log(SEPARATOR);
+    console.log(`Ticket ID: ${data.matchTicketID}`);
+    console.log(`Queue Time: ${data.queueTime}`);
+    console.log(SEPARATOR);
+    return {
+      status,
+      ticketId: data.matchTicketID,
+      queueTime: data.queueTime
+    };
+  } else {
+    console.log('\nError Details:');
+    console.log(SEPARATOR);
+    console.log('Code:', data.errorCode);
+    console.log('Message:', data.errorMessage);
+    console.log(SEPARATOR);
+    return {
+      status,
+      error: {
+        code: data.errorCode,
+        message: data.errorMessage
+      }
+    };
   }
 }
 
@@ -479,11 +665,20 @@ function handleSessionNotification(topic, payload) {
       break;
 
     case 'OnSessionJoined':
+      console.log(decodedPayload)
       console.log(`ID: ${decodedPayload.SessionID}`);
       console.log('Members:');
       decodedPayload.Members.forEach(member => {
         console.log(`- ${member.ID}: ${member.StatusV2}`);
       });
+
+      // Store members for this session
+      currentSessionMembers.set(decodedPayload.SessionID, 
+        decodedPayload.Members.map(member => ({
+          id: member.ID,
+          status: member.StatusV2
+        }))
+      );
       break;
 
     case 'OnGameSessionInviteTimeout':
@@ -506,9 +701,17 @@ function handleSessionNotification(topic, payload) {
       console.log(`Received session secret: ${decodedPayload.secret}`);
       break;
 
-      case 'OnSessionMembersChanged':
-        displayMemberChanges(decodedPayload);
-        break;
+    case 'OnSessionMembersChanged':
+      console.log(decodedPayload)
+      displayMemberChanges(decodedPayload);
+      // Update stored members
+      currentSessionMembers.set(decodedPayload.SessionID,
+        decodedPayload.Members.map(member => ({
+          id: member.ID,
+          status: member.StatusV2
+        }))
+      );
+      break;
   
       case 'OnGameSessionUpdated':
         console.log(`Session ${decodedPayload.ID} updated`);
@@ -526,7 +729,25 @@ function handleSessionNotification(topic, payload) {
           console.log('Protocol:', decodedPayload.GameServer.protocol);
         }
         break;
-  
+      
+      case 'OnSessionEnded':
+        console.log(`Session ${decodedPayload.SessionID} ended`);
+        // Remove session from stored members
+        currentSessionMembers.delete(decodedPayload.SessionID);
+        break;
+      
+      case 'OnPartyCreated':
+        console.log(formatPartyCreation(decodedPayload));
+        break;
+
+      case 'OnPartyMembersChanged':
+        console.log(formatPartyMemberChanges(decodedPayload));
+        break;
+
+      case 'OnPartyJoined':
+        console.log(formatPartyJoined(decodedPayload));
+        break;
+      
       default:
         console.log('Unhandled topic:', topic);
         console.log('Payload:', decodedPayload);
@@ -554,7 +775,7 @@ function handleWebSocketClose(err) {
       console.log('Normal closure');
       break;
     default:
-      console.log('Unexpected disconnection');
+      console.log('Unexpected disconnection', err);
   }
 }
 
@@ -573,9 +794,11 @@ const main = async () => {
     const { values } = parsedArgs
     let tokenData
 
+    console.log('values', values)
     if (values.loginType === 'device' && values.deviceId) {
       tokenData = await loginWithDevice(values.deviceId)
     } else if (values.username && values.password) {
+      console.log('Logging in with credentials...')
       tokenData = await loginWithCredentials(values.username, values.password)
     } else {
       throw new Error('Please provide valid credentials or device ID')
@@ -585,6 +808,8 @@ const main = async () => {
       accessToken: tokenData.access_token, 
       refreshToken: tokenData.refresh_token 
     })
+
+    console.log('Logged in successfully')
 
     const lobbyWs = Lobby.WebSocket(sdk)
     lobbyWs.connect()

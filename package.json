@@ -5,7 +5,6 @@
   "license": "SEE LICENSE IN LICENSE",
   "type": "module",
   "scripts": {
-    "start": "node public.mjs --username leelai.tw@gmail.com --password 8ik,mnhy",
     "start:test": "node ws.mjs --username leelai.tw@gmail.com --password 8ik,mnhy",
     "start:main": "node ws.mjs --deviceId luka --loginType device",
     "start:main1": "node ws.mjs --deviceId luka_1 --loginType device",
