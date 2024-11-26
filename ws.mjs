@@ -3,8 +3,8 @@ import { AccelByte, createAuthInterceptor } from '@accelbyte/sdk'
 import { IamUserAuthorizationClient, UsersAdminApi, UsersV4AdminApi, OAuth20V4Api, UsersApi } from '@accelbyte/sdk-iam'
 // import { UserProfileApi } from '@accelbyte/sdk-basic';
 import { Lobby } from '@accelbyte/sdk-lobby'
-import { MatchTicketsApi, BackfillApi } from '@accelbyte/sdk-matchmaking'
-import { PartyApi, GameSessionApi} from '@accelbyte/sdk-session'
+import { MatchTicketsApi, BackfillApi, RuleSetsApi, MatchPoolsApi } from '@accelbyte/sdk-matchmaking'
+import { PartyApi, GameSessionApi, ConfigurationTemplateAdminApi} from '@accelbyte/sdk-session'
 import { NamespaceAdminApi } from '@accelbyte/sdk-basic'
 
 import { parseArgs } from 'util'
@@ -73,12 +73,24 @@ const commands = {
   pm: patchMe, // shortcut for patch_me
   create_match_ticket: createMatchTicket,
   cmt: createMatchTicket, // shortcut for create_match_ticket
+  create_ruleset: createRuleSet,
+  crs: createRuleSet, // shortcut for create_ruleset
+  // update_ruleset: updateRuleSet,
+  // urs: updateRuleSet, // shortcut for update_ruleset
   create_party: createParty,
   cp: createParty, // shortcut for create_party
+  create_party_with_configuration: createPartyWithConfiguration,
+  cpc: createPartyWithConfiguration, // shortcut for create_party_with_configuration
+  create_match_pool: createMatchPool,
+  cmp: createMatchPool, // shortcut for create_match_pool
   join_party: joinParty,
   jp: joinParty, // shortcut for join_party
   create_gamesession: createGameSession,
   cgs: createGameSession, // shortcut for create_gamesession
+  createConfiguration: createConfiguration, // shortcut for create_gamesession
+  cc: createConfiguration, // shortcut for create_gamesession
+  getConfigurations: getConfigurations,
+  gc: getConfigurations, // shortcut for getConfigurations
   delete_gamesession: deleteGameSession,
   dgs: deleteGameSession, // shortcut for delete_gamesession
   join_gamesession: joinGameSession,
@@ -107,27 +119,55 @@ const commands = {
 };
 
 function showHelp() {
-  console.log('Available commands (with shortcuts):');
+  console.log('\nAvailable commands (with shortcuts):\n');
+  
+  // Basic commands
+  console.log('Basic Commands:');
+  console.log('help, h - Show this help message');
   console.log('greet, g <name> - Greet the user');
   console.log('add, a <a> <b> - Add two numbers');
   console.log('subtract, s <a> <b> - Subtract two numbers');
+
+  console.log('\nUser Management:');
   console.log('me, m - Get user information');
   console.log('patch_me, pm <displayName> <uniqueDisplayName> - Update user information');
+  console.log('create_user_bulk, cub <userIdsJson> - Create users in bulk');
+  console.log('get_token, gt - Get current access token');
+
+  console.log('\nMatchmaking:');
   console.log('create_match_ticket, cmt <matchPool> - Create a match ticket');
+  console.log('create_ruleset, crs <name> [allianceParams] - Create a ruleset');
+  console.log('  allianceParams (optional, defaults):');
+  console.log('  - minNumber: 1 (minimum number of alliances)');
+  console.log('  - maxNumber: 1 (maximum number of alliances)');
+  console.log('  - playerMinNumber: 2 (minimum players per alliance)');
+  console.log('  - playerMaxNumber: 10 (maximum players per alliance)');
+  console.log('remove_backfill, rb <backfillTicketID> - Remove a backfill ticket');
+
+  console.log('\nParty Management:');
   console.log('create_party, cp <minPlayers> <maxPlayers> - Create a party');
+  console.log('create_party_with_configuration, cpc <name> - Create a party with configuration');
   console.log('join_party, jp <code> - Join a party by code');
+
+  console.log('\nSession Management:');
   console.log('create_gamesession, cgs <session_name> - Create a game session');
+  console.log('delete_gamesession, dgs <sessionID> - Delete a game session');
   console.log('join_gamesession, jgs <sessionID> - Join a game session');
   console.log('join_gamesession_by_code, jgc <code> - Join a game session by code');
   console.log('update_gamesession, ugs <sessionID> <joinability> - Update a game session');
   console.log('browse_gamesessions, bgs - Browse game sessions');
   console.log('get_users_me_gamesessions, gms - Get user\'s game sessions');
-  console.log('create_user_bulk, cub <userIdsJson> - Create users in bulk');
-  console.log('remove_backfill, rb <backfillTicketID> - Remove a backfill ticket');
+  
+  console.log('\nSession Information:');
   console.log('list_members, lm [sessionId] - List members in all sessions or specific session');
   console.log('list_sessions, ls - List all active sessions');
-  console.log('get_token, gt - Get current access token');
-  console.log('help, h - Show this help message');
+
+  console.log('\nConfiguration Management:');
+  console.log('createConfiguration, cc <name> <minPlayers> <maxPlayers> - Create a configuration template');
+  console.log('getConfigurations, gc - Get all configuration templates');
+  
+  console.log('\nNamespace Management:');
+  console.log('createNamespace, cn <displayName> <namespace> - Create a namespace');
 }
 
 function createNamespace(displayName, namespace) {
@@ -226,6 +266,37 @@ function createMatchTicket(matchPool) {
     })
 }
 
+function createRuleSet(name,
+  minNumber = 1,
+  maxNumber = 1,
+  playerMinNumber = 2,
+  playerMaxNumber = 10
+) {
+  // Validate parameters
+  if (!name) throw new Error('Rule set name is required');
+  if (minNumber < 1 || maxNumber < 1) throw new Error('Alliance number must be at least 1');
+  
+  RuleSetsApi(sdk).createRuleset({
+    name: name,
+    enable_custom_match_function: true,
+    data: {
+      alliance: {
+        min_number: minNumber,
+        max_number: maxNumber,  
+        player_min_number: playerMinNumber,
+        player_max_number: playerMaxNumber
+      },
+      auto_backfill: true
+    }
+  }).then(response => {
+    console.info('createRuleSet response.status', response.status)
+  }).catch(err => {
+    console.error(err)
+  })
+}
+
+// function updateRuleSet(rulesetID, name) {
+
 function createParty(minPlayers = 2, maxPlayers = 10) {
   //convert string to number
   minPlayers = parseInt(minPlayers)
@@ -237,6 +308,32 @@ function createParty(minPlayers = 2, maxPlayers = 10) {
     // console.info('createParty response.data', response.data)
     handleSessionResponse(response);
   }).catch(err => {
+    console.error(err)
+  })
+}
+
+function createPartyWithConfiguration(name) {
+  //default session name
+  name = name || 'my_test_configuration_1'
+  PartyApi(sdk).createParty({
+    configurationName: name,
+  }).then(response => {
+    console.info('createParty response.data', response.data)
+  }).catch(err => {
+    console.error(err)
+  })
+}
+
+function createMatchPool(name, rule_set, session_template) {
+  MatchPoolsApi(sdk).createMatchPool({
+    name: name,
+    rule_set: rule_set,
+    session_template: session_template,
+    match_function: 'default',
+  }).then(response => {
+    console.info('createMatchPool response status', response.status)
+  }
+  ).catch(err => {
     console.error(err)
   })
 }
@@ -262,6 +359,34 @@ function createGameSession(session_name) {
     handleSessionError(err);
   })
 }
+
+function createConfiguration(name = 'my_test_configuration_1', minPlayers = 2, maxPlayers = 10) {
+  // Convert string parameters to numbers
+  minPlayers = parseInt(minPlayers);
+  maxPlayers = parseInt(maxPlayers);
+  
+  ConfigurationTemplateAdminApi(sdk).createConfiguration({
+    name: name,
+    joinability: 'OPEN',
+    autoJoin: true,
+    autoLeaveSession: true,
+    minPlayers: minPlayers,
+    maxPlayers: maxPlayers,
+  }).then(response => {
+    console.info('createConfiguration response.data', response.data)
+  }).catch(err => {
+    console.error(err)
+  })
+}
+
+function getConfigurations() {
+  ConfigurationTemplateAdminApi(sdk).getConfigurations().then(response => {
+    console.info('getConfigurations response.data', response.data)
+  }).catch(err => {
+    console.error(err)
+  })
+}
+
 
 function deleteGameSession(sessionID) {
   //deleteGamesession_BySessionId
