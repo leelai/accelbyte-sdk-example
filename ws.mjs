@@ -1,6 +1,6 @@
 import 'dotenv/config'
 import { AccelByte, createAuthInterceptor } from '@accelbyte/sdk'
-import { IamUserAuthorizationClient, UsersAdminApi, UsersV4AdminApi, OAuth20V4Api, UsersApi } from '@accelbyte/sdk-iam'
+import { IamUserAuthorizationClient, UsersAdminApi, UsersV4AdminApi, OAuth20V4Api, UsersApi, ThirdPartyCredentialAdminApi } from '@accelbyte/sdk-iam'
 // import { UserProfileApi } from '@accelbyte/sdk-basic';
 import { Lobby } from '@accelbyte/sdk-lobby'
 import { MatchTicketsApi, BackfillApi, RuleSetsApi, MatchPoolsApi } from '@accelbyte/sdk-matchmaking'
@@ -116,6 +116,8 @@ const commands = {
   get_token: getToken,
   gt: getToken, // shortcut for get_token
   cn: createNamespace,
+  create_client_credential: createClientCredential,
+  ccc: createClientCredential,
 };
 
 function showHelp() {
@@ -131,7 +133,7 @@ function showHelp() {
   console.log('\nUser Management:');
   console.log('me, m - Get user information');
   console.log('patch_me, pm <displayName> <uniqueDisplayName> - Update user information');
-  console.log('create_user_bulk, cub <userIdsJson> - Create users in bulk');
+  console.log('create_user_bulk, cub userId1 userId2... - Create users in bulk');
   console.log('get_token, gt - Get current access token');
 
   console.log('\nMatchmaking:');
@@ -154,7 +156,7 @@ function showHelp() {
   console.log('delete_gamesession, dgs <sessionID> - Delete a game session');
   console.log('join_gamesession, jgs <sessionID> - Join a game session');
   console.log('join_gamesession_by_code, jgc <code> - Join a game session by code');
-  console.log('update_gamesession, ugs <sessionID> <joinability> - Update a game session');
+  console.log('update_gamesession, ugs <sessionID> <joinability> <version> - Update a game session');
   console.log('browse_gamesessions, bgs - Browse game sessions');
   console.log('get_users_me_gamesessions, gms - Get user\'s game sessions');
   
@@ -168,6 +170,12 @@ function showHelp() {
   
   console.log('\nNamespace Management:');
   console.log('createNamespace, cn <displayName> <namespace> - Create a namespace');
+
+  console.log('\nMatching & Pool Management:');
+  console.log('create_match_pool, cmp <name> <rule_set> <session_template> - Create a match pool');
+
+  console.log('\nCredential Management:');
+  console.log('create_client_credential, ccc - Create client credential');
 }
 
 function createNamespace(displayName, namespace) {
@@ -179,6 +187,41 @@ function createNamespace(displayName, namespace) {
   }
   ).catch(err => {
     console.log(err.response.data)
+  })
+}
+
+async function createClientCredential() {
+  const sdk = AccelByte.SDK({
+    coreConfig: {
+      baseURL: 'https://aloha.prod.gamingservices.accelbyte.io',
+      namespace: 'aloha-speed7',
+      useSchemaValidation: false
+    },
+  })
+
+  const parsedArgs = parseArgs({
+    options: {
+      username: { type: 'string' },
+      password: { type: 'string' },
+      deviceId: { type: 'string' },
+      loginType: { type: 'string' }
+    },
+    args: process.argv.slice(2)
+  })
+
+  const { values } = parsedArgs
+  let tokenData
+
+  tokenData = await loginWithCredentials(values.username, values.password)
+  sdk.setToken({
+    accessToken: tokenData.access_token,
+    refreshToken: tokenData.refresh_token
+  })
+
+  ThirdPartyCredentialAdminApi(sdk).createClient_ByPlatformId_v3('device', {RedirectUri: 'http://localhost:3000'}).then(response => {
+    console.log(response.data)
+  }).catch(err => {
+    console.error(err)
   })
 }
 
@@ -707,11 +750,12 @@ async function getUsersMeGamesessions() {
   }
 }
 
-async function createUserBulk(userIds) {
+async function createUserBulk(...userIds) {
+  const userIdArray = userIds; // Convert arguments to array
   let response = await UsersApi(sdk).createUserBulkBasic_v3({
-    userIds: userIds
-  })
-  console.log(response.data)
+    userIds: userIdArray
+  });
+  console.log(response.data.data);
 }
 
 async function deleteBackfill(backfillTicketID) {
@@ -947,9 +991,11 @@ const main = async () => {
     lobbyWs.onMessage(message => {
       switch (message?.type) {
         case 'connectNotif': {
+          console.log('connectNotif', message)
           break
         }
         case 'messageNotif': {
+          console.log('messageNotif', message)
           break
         }
 
